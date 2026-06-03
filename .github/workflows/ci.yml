@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Build CLI
+        run: |
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          go build -buildvcs=false -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o bin/yazio ./cmd/yazio
+      - name: Verify version output
+        run: |
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          ./bin/yazio --version | grep "yazio version ${VERSION}"

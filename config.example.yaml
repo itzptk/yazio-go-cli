@@ -1,0 +1,17 @@
+# Example config for yazio-go-cli.
+# Copy to ~/.config/yazio-go-cli/config.yaml or pass with --config.
+
+# Optional override for the unofficial YAZIO API base URL.
+base_url: https://yzapi.yazio.com/v15
+
+# Default output mode for commands.
+# Valid values: table, json
+output: table
+
+# Tokens are written here after `yazio auth login` succeeds.
+# Leave this section commented out when sharing the file.
+# token:
+#   access_token: your-access-token
+#   refresh_token: your-refresh-token
+#   token_type: Bearer
+#   expires_at: 2026-06-02T12:34:56Z

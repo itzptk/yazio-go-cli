@@ -1,0 +1,428 @@
+name: Release
+
+concurrency:
+  group: release-${{ github.event.inputs.channel || github.ref_name }}
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: false
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+          - build-only
+      version:
+        description: Release version (for example 1.2.3 or v1.2.3); required for stable
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check_changes:
+    name: Check for changes since last beta
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      has_changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: check
+        name: Compare HEAD to last beta tag
+        shell: bash
+        run: |
+          last_beta_tag=$(git tag --list 'v*-beta.*' --sort=-creatordate | head -n 1)
+          if [[ -z "$last_beta_tag" ]]; then
+            echo "No previous beta tag found. Proceeding with release."
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last_beta_sha=$(git rev-parse "$last_beta_tag^{commit}")
+          head_sha=$(git rev-parse HEAD)
+
+          if [[ "$last_beta_sha" == "$head_sha" ]]; then
+            echo "No changes on main since last beta release ($last_beta_tag). Skipping."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Changes detected on main since $last_beta_tag ($last_beta_sha → $head_sha). Proceeding."
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  preflight:
+    name: Preflight
+    needs: [check_changes]
+    if: |
+      !failure() && !cancelled() &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.channel != 'build-only') &&
+      (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      release_channel: ${{ steps.release_meta.outputs.release_channel }}
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
+      release_name: ${{ steps.release_meta.outputs.name }}
+      is_prerelease: ${{ steps.release_meta.outputs.is_prerelease }}
+      make_latest: ${{ steps.release_meta.outputs.make_latest }}
+      previous_tag: ${{ steps.previous_tag.outputs.previous_tag }}
+      ref: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - id: release_meta
+        name: Resolve release version
+        shell: bash
+        env:
+          DISPATCH_CHANNEL: ${{ github.event.inputs.channel }}
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-stable}" == "beta" ) ]]; then
+            python3 scripts/resolve_prerelease.py --github-output
+            echo "release_channel=beta" >> "$GITHUB_OUTPUT"
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            raw="${DISPATCH_VERSION}"
+            if [[ -z "$raw" ]]; then
+              echo "workflow_dispatch stable releases require the version input." >&2
+              exit 1
+            fi
+
+            version="${raw#v}"
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release version: $raw" >&2
+              exit 1
+            fi
+
+            echo "release_channel=stable" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+            echo "name=yazio-go-cli v$version" >> "$GITHUB_OUTPUT"
+            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "make_latest=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "make_latest=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Test
+        run: go test ./...
+
+      - id: previous_tag
+        name: Resolve previous release tag
+        run: |
+          python3 scripts/resolve_previous_release_tag.py \
+            --channel "${{ steps.release_meta.outputs.release_channel }}" \
+            --current-tag "${{ steps.release_meta.outputs.tag }}" \
+            --github-output
+
+  build:
+    name: Build release artifacts
+    needs: preflight
+    if: |
+      !failure() && !cancelled() &&
+      needs.preflight.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.channel != 'build-only')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Align VERSION
+        run: python3 scripts/update_release_version.py "${{ needs.preflight.outputs.version }}"
+
+      - name: Build release archives
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          platforms=(
+            "linux amd64 tar.gz"
+            "linux arm64 tar.gz"
+            "darwin amd64 tar.gz"
+            "darwin arm64 tar.gz"
+            "windows amd64 zip"
+          )
+
+          for spec in "${platforms[@]}"; do
+            read -r goos goarch archive <<< "$spec"
+            stem="yazio-go-cli_${VERSION}_${goos}_${goarch}"
+            workdir="dist/${stem}"
+            binary="yazio"
+            if [[ "$goos" == "windows" ]]; then
+              binary="yazio.exe"
+            fi
+
+            mkdir -p "$workdir"
+            cp README.md VERSION "$workdir/"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+              go build -buildvcs=false -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "$workdir/$binary" ./cmd/yazio
+
+            if [[ "$archive" == "zip" ]]; then
+              (cd dist && zip -qr "${stem}.zip" "$stem")
+            else
+              tar -C dist -czf "dist/${stem}.tar.gz" "$stem"
+            fi
+            rm -rf "$workdir"
+          done
+
+          sha256sum dist/*.tar.gz dist/*.zip > dist/checksums.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets
+          path: dist/*
+          if-no-files-found: error
+
+  build_only:
+    name: Build artifacts (no publish)
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.channel == 'build-only'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build snapshot artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          mkdir -p dist
+          platforms=(
+            "linux amd64 tar.gz"
+            "linux arm64 tar.gz"
+            "darwin amd64 tar.gz"
+            "darwin arm64 tar.gz"
+            "windows amd64 zip"
+          )
+
+          for spec in "${platforms[@]}"; do
+            read -r goos goarch archive <<< "$spec"
+            stem="yazio-go-cli_${VERSION}_${goos}_${goarch}"
+            workdir="dist/${stem}"
+            binary="yazio"
+            if [[ "$goos" == "windows" ]]; then
+              binary="yazio.exe"
+            fi
+
+            mkdir -p "$workdir"
+            cp README.md VERSION "$workdir/"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+              go build -buildvcs=false -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o "$workdir/$binary" ./cmd/yazio
+
+            if [[ "$archive" == "zip" ]]; then
+              (cd dist && zip -qr "${stem}.zip" "$stem")
+            else
+              tar -C dist -czf "dist/${stem}.tar.gz" "$stem"
+            fi
+            rm -rf "$workdir"
+          done
+
+          sha256sum dist/*.tar.gz dist/*.zip > dist/checksums.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: yazio-go-cli-build-${{ github.run_number }}
+          path: dist/*
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: [preflight, build]
+    if: |
+      !failure() && !cancelled() &&
+      needs.preflight.result == 'success' &&
+      needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - id: app_token
+        name: Mint release app token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-assets
+          path: release-assets
+
+      - name: Publish release
+        if: needs.preflight.outputs.previous_tag != '' && steps.app_token.outputs.token != ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: true
+          previous_tag: ${{ needs.preflight.outputs.previous_tag }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          make_latest: ${{ needs.preflight.outputs.make_latest == 'true' }}
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/checksums.txt
+          fail_on_unmatched_files: true
+          token: ${{ steps.app_token.outputs.token }}
+
+      - name: Publish release (GITHUB_TOKEN)
+        if: needs.preflight.outputs.previous_tag != '' && steps.app_token.outputs.token == ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: true
+          previous_tag: ${{ needs.preflight.outputs.previous_tag }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          make_latest: ${{ needs.preflight.outputs.make_latest == 'true' }}
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/checksums.txt
+          fail_on_unmatched_files: true
+
+      - name: Publish first release
+        if: needs.preflight.outputs.previous_tag == '' && steps.app_token.outputs.token != ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: true
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          make_latest: ${{ needs.preflight.outputs.make_latest == 'true' }}
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/checksums.txt
+          fail_on_unmatched_files: true
+          token: ${{ steps.app_token.outputs.token }}
+
+      - name: Publish first release (GITHUB_TOKEN)
+        if: needs.preflight.outputs.previous_tag == '' && steps.app_token.outputs.token == ''
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          name: ${{ needs.preflight.outputs.release_name }}
+          generate_release_notes: true
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          make_latest: ${{ needs.preflight.outputs.make_latest == 'true' }}
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/checksums.txt
+          fail_on_unmatched_files: true
+
+  finalize:
+    name: Finalize release
+    needs: [preflight, release]
+    if: |
+      !failure() && !cancelled() &&
+      needs.preflight.result == 'success' &&
+      needs.release.result == 'success' &&
+      needs.preflight.outputs.release_channel == 'stable' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.channel != 'build-only')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - id: app_token
+        name: Mint release app token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token || github.token }}
+          persist-credentials: true
+
+      - id: app_bot
+        name: Resolve GitHub App bot identity
+        if: steps.app_token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
+
+      - id: update_version
+        name: Update VERSION
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: python3 scripts/update_release_version.py "$RELEASE_VERSION" --github-output
+
+      - name: Commit and push version bump
+        if: steps.update_version.outputs.changed == 'true'
+        env:
+          RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          if [[ -n "${{ steps.app_token.outputs.token }}" ]]; then
+            git config user.name "${{ steps.app_bot.outputs.name }}"
+            git config user.email "${{ steps.app_bot.outputs.email }}"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          fi
+          git add VERSION
+          git commit -m "chore(release): prepare $RELEASE_TAG"
+          git push origin HEAD:main
