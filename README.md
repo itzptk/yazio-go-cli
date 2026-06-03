@@ -36,6 +36,7 @@
 | 🗑️ | **Remove entries** | Remove consumed diary entries by entry ID |
 | ⚙️ | **Config bootstrap** | Generate a starter config with `yazio config init` |
 | 🧾 | **Scriptable output** | Use table output for humans or JSON output for automation |
+| 📤 | **Diary CSV export** | Export one day or an inclusive date range of diary entries to CSV |
 
 ## ⌨️ Usage
 
@@ -63,8 +64,18 @@ yazio auth login
 | `yazio summary` | Fetch today's daily summary |
 | `yazio summary 2026-06-02` | Fetch the daily summary for a date |
 | `yazio consumed 2026-06-02` | List consumed diary entries for a date |
+| `yazio export diary 2026-06-02` | Export one diary day as CSV to stdout |
+| `yazio export diary --from 2026-06-01 --to 2026-06-07 --file diary.csv` | Export an inclusive diary date range to a CSV file |
 | `yazio search banana` | Search products in the YAZIO database |
 | `yazio --output json summary 2026-06-02` | Emit JSON for scripting |
+
+CSV exports write this header:
+
+```text
+date,category,meal,entry_id,type,product_id,name,producer,amount,serving,serving_quantity,raw_json
+```
+
+If you pass `--file`, the CLI writes the CSV file and prints the exported entry count. Without `--file`, CSV goes to stdout for piping into other tools. Product rows use typed columns directly; recipe portions and simple products also include `raw_json` so unsupported YAZIO diary fields are not silently dropped.
 
 ### Write operations
 

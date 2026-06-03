@@ -20,23 +20,42 @@ import (
 )
 
 type App struct {
-	out     io.Writer
-	v       *viper.Viper
-	cfgPath string
-	cfg     config.File
-	baseURL string
-	output  string
+	out           io.Writer
+	v             *viper.Viper
+	cfgPath       string
+	cfg           config.File
+	baseURL       string
+	output        string
+	clientFactory func(string) apiClient
+}
+
+type apiClient interface {
+	Login(context.Context, yazio.Credentials) (yazio.Token, error)
+	Refresh(context.Context, yazio.Token) (yazio.Token, error)
+	GetUser(context.Context, yazio.Token) (yazio.User, error)
+	GetDailySummary(context.Context, yazio.Token, time.Time) (yazio.DailySummary, error)
+	GetConsumedItems(context.Context, yazio.Token, time.Time) (yazio.ConsumedItemsResponse, error)
+	SearchProducts(context.Context, yazio.Token, yazio.SearchOptions) ([]yazio.ProductSearchResult, error)
+	AddConsumedItem(context.Context, yazio.Token, yazio.AddConsumedItemRequest) error
+	RemoveConsumedItem(context.Context, yazio.Token, string) error
 }
 
 func NewRootCommand(out io.Writer, version string) (*cobra.Command, error) {
+	return newRootCommand(out, version, func(baseURL string) apiClient {
+		return yazio.NewClient(baseURL)
+	})
+}
+
+func newRootCommand(out io.Writer, version string, clientFactory func(string) apiClient) (*cobra.Command, error) {
 	defaultConfigPath, err := config.DefaultPath()
 	if err != nil {
 		return nil, err
 	}
 
 	app := &App{
-		out: out,
-		v:   viper.New(),
+		out:           out,
+		v:             viper.New(),
+		clientFactory: clientFactory,
 	}
 	app.v.SetEnvPrefix("YAZIO")
 	app.v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
@@ -83,6 +102,7 @@ func NewRootCommand(out io.Writer, version string) (*cobra.Command, error) {
 	cmd.AddCommand(app.newUserCommand())
 	cmd.AddCommand(app.newSummaryCommand())
 	cmd.AddCommand(app.newConsumedCommand())
+	cmd.AddCommand(app.newExportCommand())
 	cmd.AddCommand(app.newSearchCommand())
 	cmd.AddCommand(app.newAddCommand())
 	cmd.AddCommand(app.newRemoveCommand())
@@ -404,8 +424,8 @@ func (a *App) newRemoveCommand() *cobra.Command {
 	}
 }
 
-func (a *App) client() *yazio.Client {
-	return yazio.NewClient(a.baseURL)
+func (a *App) client() apiClient {
+	return a.clientFactory(a.baseURL)
 }
 
 func (a *App) ensureToken(ctx context.Context) (yazio.Token, error) {
