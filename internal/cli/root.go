@@ -352,6 +352,9 @@ func (a *App) newAddCommand() *cobra.Command {
 			if productID == "" || meal == "" || amount <= 0 {
 				return errors.New("--product-id, --meal, and --amount are required")
 			}
+			if serving != "" && servingQuantity <= 0 {
+				return errors.New("--serving-quantity must be greater than zero when --serving is set")
+			}
 			date, err := parseDateFlag(dateValue)
 			if err != nil {
 				return err
