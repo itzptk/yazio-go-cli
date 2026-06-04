@@ -2,8 +2,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -85,7 +88,30 @@ func Load(path string) (File, error) {
 	if cfg.Output == "" {
 		cfg.Output = DefaultOutput
 	}
+	baseURL, err := NormalizeBaseURL(cfg.BaseURL)
+	if err != nil {
+		return File{}, err
+	}
+	cfg.BaseURL = baseURL
 	return cfg, nil
+}
+
+func NormalizeBaseURL(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		trimmed = DefaultBaseURL
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("invalid base URL %q: %w", value, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("invalid base URL %q: expected http or https URL", value)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("invalid base URL %q: expected host", value)
+	}
+	return strings.TrimRight(trimmed, "/"), nil
 }
 
 func Save(path string, cfg File) error {
@@ -95,6 +121,11 @@ func Save(path string, cfg File) error {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = DefaultBaseURL
 	}
+	baseURL, err := NormalizeBaseURL(cfg.BaseURL)
+	if err != nil {
+		return err
+	}
+	cfg.BaseURL = baseURL
 	if cfg.Output == "" {
 		cfg.Output = DefaultOutput
 	}

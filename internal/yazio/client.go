@@ -34,13 +34,22 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) buildURL(endpoint string, query url.Values) string {
-	base, _ := url.Parse(c.baseURL + "/")
+func (c *Client) buildURL(endpoint string, query url.Values) (string, error) {
+	base, err := url.Parse(c.baseURL + "/")
+	if err != nil {
+		return "", fmt.Errorf("invalid base URL %q: %w", c.baseURL, err)
+	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return "", fmt.Errorf("invalid base URL %q: expected http or https URL", c.baseURL)
+	}
+	if base.Host == "" {
+		return "", fmt.Errorf("invalid base URL %q: expected host", c.baseURL)
+	}
 	base.Path = path.Join(base.Path, strings.TrimPrefix(endpoint, "/"))
 	if len(query) > 0 {
 		base.RawQuery = query.Encode()
 	}
-	return base.String()
+	return base.String(), nil
 }
 
 type tokenResponse struct {
@@ -169,7 +178,11 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, token Toke
 		body = bytes.NewReader(payload)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.buildURL(endpoint, query), body)
+	requestURL, err := c.buildURL(endpoint, query)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return err
 	}
