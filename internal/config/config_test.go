@@ -96,3 +96,20 @@ func TestExampleFileParsesAsDefaultsWithoutToken(t *testing.T) {
 		t.Fatalf("ExampleFile missing expected keys: %q", ExampleFile)
 	}
 }
+
+func TestLoadRejectsInvalidBaseURL(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("base_url: \"http://[::1\"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid base URL error")
+	}
+	if !strings.Contains(err.Error(), "invalid base URL") {
+		t.Fatalf("Load() error = %q, want invalid base URL", err)
+	}
+}

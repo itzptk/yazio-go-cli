@@ -58,12 +58,20 @@ func NewRootCommand(out io.Writer, version string) (*cobra.Command, error) {
 				return err
 			}
 
-			if app.v.IsSet("base_url") {
-				cfg.BaseURL = app.v.GetString("base_url")
+			if envBaseURL, ok := os.LookupEnv("YAZIO_BASE_URL"); ok {
+				cfg.BaseURL = envBaseURL
+			}
+			if flag := cmd.Root().PersistentFlags().Lookup("base-url"); flag != nil && flag.Changed {
+				cfg.BaseURL = flag.Value.String()
 			}
 			if app.v.IsSet("output") {
 				cfg.Output = app.v.GetString("output")
 			}
+			baseURL, err := config.NormalizeBaseURL(cfg.BaseURL)
+			if err != nil {
+				return err
+			}
+			cfg.BaseURL = baseURL
 			app.cfg = cfg
 			app.baseURL = cfg.BaseURL
 			app.output = cfg.Output

@@ -251,10 +251,27 @@ func TestBuildURL(t *testing.T) {
 	values := url.Values{}
 	values.Set("date", "2026-06-02")
 
-	got := client.buildURL("/user/widgets/daily-summary", values)
+	got, err := client.buildURL("/user/widgets/daily-summary", values)
+	if err != nil {
+		t.Fatalf("buildURL() error = %v", err)
+	}
 	want := "https://yzapi.yazio.com/v15/user/widgets/daily-summary?date=2026-06-02"
 	if got != want {
 		t.Fatalf("buildURL() = %q, want %q", got, want)
+	}
+}
+
+func TestInvalidBaseURLReturnsError(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient("http://[::1")
+
+	_, err := client.GetUser(context.Background(), Token{AccessToken: "access"})
+	if err == nil {
+		t.Fatal("GetUser() error = nil, want invalid base URL error")
+	}
+	if !strings.Contains(err.Error(), "invalid base URL") {
+		t.Fatalf("GetUser() error = %q, want invalid base URL", err)
 	}
 }
 
