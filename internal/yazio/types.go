@@ -136,6 +136,8 @@ type ConsumedItem struct {
 	Daytime         string   `json:"daytime"`
 	Type            string   `json:"type"`
 	ProductID       string   `json:"product_id"`
+	Name            string   `json:"name"`
+	Producer        string   `json:"producer"`
 	Amount          float64  `json:"amount"`
 	Serving         *string  `json:"serving"`
 	ServingQuantity *float64 `json:"serving_quantity"`
