@@ -136,5 +136,8 @@ func Save(path string, cfg File) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, content, 0o600)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
