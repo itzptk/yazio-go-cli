@@ -51,6 +51,39 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 }
 
+func TestSaveForcesExistingFilePrivatePermissions(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("base_url: https://example.com\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	if err := Save(path, File{
+		BaseURL: DefaultBaseURL,
+		Output:  DefaultOutput,
+		Token: &Token{
+			AccessToken:  "access-token",
+			RefreshToken: "refresh-token",
+			TokenType:    "Bearer",
+			ExpiresAt:    time.Unix(1_717_280_000, 0).UTC(),
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Fatalf("saved config mode = %v, want %v", got, want)
+	}
+}
+
 func TestLoadMissingReturnsDefaults(t *testing.T) {
 	t.Parallel()
 
