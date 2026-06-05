@@ -1,5 +1,5 @@
 BINARY := bin/yazio
-GO := /usr/local/go/bin/go
+GO ?= $(or $(shell command -v go 2>/dev/null),$(if $(wildcard /usr/local/go/bin/go),/usr/local/go/bin/go,go))
 DOCKER_UID := $(shell id -u)
 DOCKER_GID := $(shell id -g)
 
