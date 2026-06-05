@@ -422,14 +422,18 @@ func (a *App) newRemoveCommand() *cobra.Command {
 		Short: "Remove a consumed diary entry by entry ID",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			entryID := args[0]
+			if _, err := uuid.Parse(entryID); err != nil {
+				return fmt.Errorf("invalid entry ID %q: expected UUID", entryID)
+			}
 			token, err := a.ensureToken(cmd.Context())
 			if err != nil {
 				return err
 			}
-			if err := a.client().RemoveConsumedItem(cmd.Context(), token, args[0]); err != nil {
+			if err := a.client().RemoveConsumedItem(cmd.Context(), token, entryID); err != nil {
 				return err
 			}
-			fmt.Fprintf(a.out, "removed entry %s\n", args[0])
+			fmt.Fprintf(a.out, "removed entry %s\n", entryID)
 			return nil
 		},
 	}
