@@ -197,7 +197,7 @@ jobs:
             rm -rf "$workdir"
           done
 
-          sha256sum dist/*.tar.gz dist/*.zip > dist/checksums.txt
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
@@ -260,7 +260,7 @@ jobs:
             rm -rf "$workdir"
           done
 
-          sha256sum dist/*.tar.gz dist/*.zip > dist/checksums.txt
+          (cd dist && sha256sum *.tar.gz *.zip > checksums.txt)
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
