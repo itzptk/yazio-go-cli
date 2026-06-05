@@ -16,7 +16,7 @@ type Token struct {
 
 func (t Token) Expired(now time.Time) bool {
 	if t.ExpiresAt.IsZero() {
-		return false
+		return true
 	}
 	return !now.Before(t.ExpiresAt.Add(-30 * time.Second))
 }
