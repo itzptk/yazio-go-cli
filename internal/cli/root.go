@@ -90,7 +90,12 @@ func newRootCommand(out io.Writer, version string, clientFactory func(string) ap
 			if err != nil {
 				return err
 			}
+			output, err := config.NormalizeOutput(cfg.Output)
+			if err != nil {
+				return err
+			}
 			cfg.BaseURL = baseURL
+			cfg.Output = output
 			app.cfg = cfg
 			app.baseURL = cfg.BaseURL
 			app.output = cfg.Output
