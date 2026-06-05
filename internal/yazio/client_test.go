@@ -244,6 +244,139 @@ func TestRemoveConsumedItem(t *testing.T) {
 	}
 }
 
+func TestGetRequestsRetryTransientStatusBeforeSuccess(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.URL.Path != "/user" {
+			t.Fatalf("path = %q, want /user", r.URL.Path)
+		}
+		if attempts == 1 {
+			http.Error(w, "temporary outage", http.StatusServiceUnavailable)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"email":"user@example.com"}`)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	got, err := client.GetUser(context.Background(), Token{AccessToken: "access"})
+	if err != nil {
+		t.Fatalf("GetUser() error = %v", err)
+	}
+	if got.Email != "user@example.com" {
+		t.Fatalf("Email = %q, want user@example.com", got.Email)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestGetRequestsRetryTransientNetworkErrorBeforeSuccess(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	client := NewClient("https://api.example.test")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if req.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", req.Method)
+		}
+		if req.URL.Path != "/user" {
+			t.Fatalf("path = %q, want /user", req.URL.Path)
+		}
+		if attempts == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"email":"user@example.com"}`)),
+			Request:    req,
+		}, nil
+	})}
+
+	got, err := client.GetUser(context.Background(), Token{AccessToken: "access"})
+	if err != nil {
+		t.Fatalf("GetUser() error = %v", err)
+	}
+	if got.Email != "user@example.com" {
+		t.Fatalf("Email = %q, want user@example.com", got.Email)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+}
+
+func TestGetRequestsReportAttemptsAfterTransientStatusFailures(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "temporary outage", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.GetUser(context.Background(), Token{AccessToken: "access"})
+	if err == nil {
+		t.Fatal("GetUser() error = nil, want retry exhaustion error")
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	message := err.Error()
+	for _, want := range []string{"GET /user", "attempt 3/3", "503"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("GetUser() error = %q, want it to contain %q", message, want)
+		}
+	}
+}
+
+func TestWriteRequestsDoNotRetryTransientStatus(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", r.Method)
+		}
+		http.Error(w, "temporary outage", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	err := client.AddConsumedItem(context.Background(), Token{AccessToken: "access"}, AddConsumedItemRequest{
+		ID:        "22222222-2222-2222-2222-222222222222",
+		ProductID: "11111111-1111-1111-1111-111111111111",
+		Date:      time.Date(2026, 6, 2, 15, 0, 0, 0, time.UTC),
+		Daytime:   "breakfast",
+		Amount:    120,
+	})
+	if err == nil {
+		t.Fatal("AddConsumedItem() error = nil, want transient status error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	message := err.Error()
+	if !strings.Contains(message, "POST /user/consumed-items") {
+		t.Fatalf("AddConsumedItem() error = %q, want endpoint context", message)
+	}
+	if strings.Contains(message, "attempt") {
+		t.Fatalf("AddConsumedItem() error = %q, want no retry attempt marker for single-shot write", message)
+	}
+}
+
 func TestBuildURL(t *testing.T) {
 	t.Parallel()
 
@@ -277,3 +410,9 @@ func TestInvalidBaseURLReturnsError(t *testing.T) {
 
 func stringPtr(v string) *string    { return &v }
 func float64Ptr(v float64) *float64 { return &v }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}

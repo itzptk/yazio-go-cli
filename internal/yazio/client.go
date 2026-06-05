@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	defaultClientID     = "1_4hiybetvfksgw40o0sog4s884kwc840wwso8go4k8c04goo4c"
-	defaultClientSecret = "6rok2m65xuskgkgogw40wkkk8sw0osg84s8cggsc4woos4s8o"
+	defaultClientID       = "1_4hiybetvfksgw40o0sog4s884kwc840wwso8go4k8c04goo4c"
+	defaultClientSecret   = "6rok2m65xuskgkgogw40wkkk8sw0osg84s8cggsc4woos4s8o"
+	getRequestMaxAttempts = 3
+	getRetryBaseDelay     = 100 * time.Millisecond
 )
 
 type Client struct {
@@ -169,52 +171,126 @@ func (c *Client) RemoveConsumedItem(ctx context.Context, token Token, entryID st
 }
 
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, token Token, query url.Values, requestBody any, responseBody any) error {
-	var body io.Reader
+	var payload []byte
 	if requestBody != nil {
-		payload, err := json.Marshal(requestBody)
+		var err error
+		payload, err = json.Marshal(requestBody)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(payload)
 	}
 
 	requestURL, err := c.buildURL(endpoint, query)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
-	if err != nil {
+
+	maxAttempts := maxAttemptsForMethod(method)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		var body io.Reader
+		if payload != nil {
+			body = bytes.NewReader(payload)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
+		if err != nil {
+			return err
+		}
+		if requestBody != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token.AccessToken != "" {
+			typeName := token.TokenType
+			if typeName == "" {
+				typeName = "Bearer"
+			}
+			req.Header.Set("Authorization", fmt.Sprintf("%s %s", typeName, token.AccessToken))
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if shouldRetryRequest(ctx, method, attempt, maxAttempts) {
+				if waitErr := waitForRetry(ctx, attempt); waitErr != nil {
+					return formatRetryError(method, endpoint, waitErr, attempt, maxAttempts)
+				}
+				continue
+			}
+			return formatRetryError(method, endpoint, err, attempt, maxAttempts)
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			msg := strings.TrimSpace(string(body))
+			if msg == "" {
+				msg = http.StatusText(resp.StatusCode)
+			}
+			if isTransientStatus(resp.StatusCode) && shouldRetryRequest(ctx, method, attempt, maxAttempts) {
+				if waitErr := waitForRetry(ctx, attempt); waitErr != nil {
+					return formatRetryError(method, endpoint, waitErr, attempt, maxAttempts)
+				}
+				continue
+			}
+			return formatStatusError(method, endpoint, msg, resp.StatusCode, attempt, maxAttempts)
+		}
+
+		if responseBody == nil || resp.StatusCode == http.StatusNoContent {
+			_ = resp.Body.Close()
+			return nil
+		}
+		err = json.NewDecoder(resp.Body).Decode(responseBody)
+		_ = resp.Body.Close()
 		return err
 	}
-	if requestBody != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if token.AccessToken != "" {
-		typeName := token.TokenType
-		if typeName == "" {
-			typeName = "Bearer"
-		}
-		req.Header.Set("Authorization", fmt.Sprintf("%s %s", typeName, token.AccessToken))
-	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	return fmt.Errorf("yazio api %s %s: retry attempts exhausted", method, endpoint)
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		msg := strings.TrimSpace(string(body))
-		if msg == "" {
-			msg = http.StatusText(resp.StatusCode)
-		}
-		return fmt.Errorf("yazio api %s %s: %s", method, endpoint, msg)
+func maxAttemptsForMethod(method string) int {
+	if method == http.MethodGet {
+		return getRequestMaxAttempts
 	}
-	if responseBody == nil || resp.StatusCode == http.StatusNoContent {
+	return 1
+}
+
+func shouldRetryRequest(ctx context.Context, method string, attempt int, maxAttempts int) bool {
+	return method == http.MethodGet && attempt < maxAttempts && ctx.Err() == nil
+}
+
+func isTransientStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func waitForRetry(ctx context.Context, attempt int) error {
+	delay := getRetryBaseDelay * time.Duration(1<<(attempt-1))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(responseBody)
+}
+
+func formatRetryError(method, endpoint string, err error, attempt int, maxAttempts int) error {
+	if maxAttempts > 1 {
+		return fmt.Errorf("yazio api %s %s: %w (attempt %d/%d)", method, endpoint, err, attempt, maxAttempts)
+	}
+	return fmt.Errorf("yazio api %s %s: %w", method, endpoint, err)
+}
+
+func formatStatusError(method, endpoint string, message string, statusCode int, attempt int, maxAttempts int) error {
+	if maxAttempts > 1 && isTransientStatus(statusCode) {
+		return fmt.Errorf("yazio api %s %s: %s (attempt %d/%d, status %d)", method, endpoint, message, attempt, maxAttempts, statusCode)
+	}
+	return fmt.Errorf("yazio api %s %s: %s", method, endpoint, message)
 }
 
 func formatDate(date time.Time) string {
