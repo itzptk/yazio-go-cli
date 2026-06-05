@@ -146,3 +146,20 @@ func TestLoadRejectsInvalidBaseURL(t *testing.T) {
 		t.Fatalf("Load() error = %q, want invalid base URL", err)
 	}
 }
+
+func TestLoadRejectsInvalidOutput(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("output: csv\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load() error = nil, want invalid output error")
+	}
+	if !strings.Contains(err.Error(), "invalid output") || !strings.Contains(err.Error(), "expected table or json") {
+		t.Fatalf("Load() error = %q, want invalid output format guidance", err)
+	}
+}

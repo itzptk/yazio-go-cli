@@ -93,6 +93,11 @@ func Load(path string) (File, error) {
 		return File{}, err
 	}
 	cfg.BaseURL = baseURL
+	output, err := NormalizeOutput(cfg.Output)
+	if err != nil {
+		return File{}, err
+	}
+	cfg.Output = output
 	return cfg, nil
 }
 
@@ -112,6 +117,19 @@ func NormalizeBaseURL(value string) (string, error) {
 		return "", fmt.Errorf("invalid base URL %q: expected host", value)
 	}
 	return strings.TrimRight(trimmed, "/"), nil
+}
+
+func NormalizeOutput(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return DefaultOutput, nil
+	}
+	switch trimmed {
+	case "table", "json":
+		return trimmed, nil
+	default:
+		return "", fmt.Errorf("invalid output %q: expected table or json", value)
+	}
 }
 
 func Save(path string, cfg File) error {

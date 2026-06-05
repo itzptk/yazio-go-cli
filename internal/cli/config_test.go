@@ -102,3 +102,69 @@ func TestBaseURLEnvRejectsMalformedURLBeforeCommand(t *testing.T) {
 		t.Fatalf("error = %q, want invalid base URL", err)
 	}
 }
+
+func TestOutputFlagRejectsInvalidValueBeforeCommand(t *testing.T) {
+	var out bytes.Buffer
+	cmd, err := NewRootCommand(&out, "dev")
+	if err != nil {
+		t.Fatalf("NewRootCommand() error = %v", err)
+	}
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cmd.SetArgs([]string{"--config", configPath, "--output", "csv", "auth", "status"})
+
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want invalid output error")
+	}
+	if !strings.Contains(err.Error(), "invalid output") || !strings.Contains(err.Error(), "expected table or json") {
+		t.Fatalf("error = %q, want invalid output format guidance", err)
+	}
+}
+
+func TestOutputEnvRejectsInvalidValueBeforeCommand(t *testing.T) {
+	t.Setenv("YAZIO_OUTPUT", "yaml")
+
+	var out bytes.Buffer
+	cmd, err := NewRootCommand(&out, "dev")
+	if err != nil {
+		t.Fatalf("NewRootCommand() error = %v", err)
+	}
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	cmd.SetArgs([]string{"--config", configPath, "auth", "status"})
+
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want invalid output error")
+	}
+	if !strings.Contains(err.Error(), "invalid output") || !strings.Contains(err.Error(), "expected table or json") {
+		t.Fatalf("error = %q, want invalid output format guidance", err)
+	}
+}
+
+func TestOutputConfigRejectsInvalidValueBeforeCommand(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("output: xml\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd, err := NewRootCommand(&out, "dev")
+	if err != nil {
+		t.Fatalf("NewRootCommand() error = %v", err)
+	}
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"--config", configPath, "auth", "status"})
+
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want invalid output error")
+	}
+	if !strings.Contains(err.Error(), "invalid output") || !strings.Contains(err.Error(), "expected table or json") {
+		t.Fatalf("error = %q, want invalid output format guidance", err)
+	}
+}
