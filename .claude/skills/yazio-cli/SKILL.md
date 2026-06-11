@@ -1,11 +1,11 @@
 ---
 name: yazio-cli
-description: Use when an agent needs to read, export, or pipe YAZIO nutrition data via the yazio CLI — daily summaries, diary entries, product search, or adding/removing entries. Covers single-day reads, multi-day backfills (the CLI defaults to today), bulk CSV exports, JSON output for piping into other APIs, and the auth/token lifecycle. Trigger whenever a task mentions YAZIO, food logging exports, calorie diary backfills, or "pull my YAZIO data into X".
+description: Use when an agent needs to read, write, export, or pipe YAZIO nutrition data via the yazio CLI. Covers both directions — reading (daily summaries, diary entries, product search, multi-day backfills with the today-UTC default, bulk CSV exports, JSON for piping into other APIs) and writing (logging meals from chat/agentic flows via product search → add, removing entries, backdated logging) — plus the auth/token lifecycle and idempotency caveats for replay-safe writes. Trigger whenever a task mentions YAZIO, food logging, calorie tracking, diary backfills, "log this meal for me", "pull my YAZIO data into X", or any agentic nutrition workflow.
 ---
 
 # yazio-cli
 
-A scriptable CLI for the unofficial YAZIO API. This skill is how an agent drives it end-to-end for data extraction and transfer workflows.
+A scriptable CLI for the unofficial YAZIO API. This skill is how an agent drives it end-to-end — both reading data out (summaries, diaries, exports) and writing data in (logging meals, removing entries) from scripts or chat-driven flows.
 
 ## Mental model
 
