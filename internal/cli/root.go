@@ -27,6 +27,7 @@ type App struct {
 	cfg           config.File
 	baseURL       string
 	output        string
+	now           func() time.Time
 	oauth         yazio.OAuthCredentials
 	clientFactory func(string, yazio.OAuthCredentials) apiClient
 }
@@ -51,6 +52,10 @@ func NewRootCommand(out io.Writer, version string) (*cobra.Command, error) {
 }
 
 func newRootCommand(out io.Writer, version string, clientFactory func(string, yazio.OAuthCredentials) apiClient) (*cobra.Command, error) {
+	return newRootCommandWithClock(out, version, clientFactory, time.Now)
+}
+
+func newRootCommandWithClock(out io.Writer, version string, clientFactory func(string, yazio.OAuthCredentials) apiClient, now func() time.Time) (*cobra.Command, error) {
 	defaultConfigPath, err := config.DefaultPath()
 	if err != nil {
 		return nil, err
@@ -59,6 +64,7 @@ func newRootCommand(out io.Writer, version string, clientFactory func(string, ya
 	app := &App{
 		out:           out,
 		v:             viper.New(),
+		now:           now,
 		clientFactory: clientFactory,
 	}
 	app.v.SetEnvPrefix("YAZIO")
@@ -267,7 +273,7 @@ func (a *App) newSummaryCommand() *cobra.Command {
 		Short: "Fetch the daily summary",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			date, err := parseDateArg(args)
+			date, err := parseDateArg(args, a.now)
 			if err != nil {
 				return err
 			}
@@ -309,7 +315,7 @@ func (a *App) newConsumedCommand() *cobra.Command {
 		Short: "List diary entries for a date",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			date, err := parseDateArg(args)
+			date, err := parseDateArg(args, a.now)
 			if err != nil {
 				return err
 			}
@@ -494,7 +500,7 @@ func (a *App) newAddCommand() *cobra.Command {
 	cmd.Flags().Float64Var(&amount, "amount", 0, "Amount of the serving/base unit")
 	cmd.Flags().StringVar(&serving, "serving", "", "Serving unit, e.g. g")
 	cmd.Flags().Float64Var(&servingQuantity, "serving-quantity", 1, "Serving quantity multiplier")
-	cmd.Flags().StringVar(&dateValue, "date", time.Now().UTC().Format("2006-01-02"), "Diary date YYYY-MM-DD")
+	cmd.Flags().StringVar(&dateValue, "date", todayDate(a.now()).Format("2006-01-02"), "Diary date YYYY-MM-DD")
 	return cmd
 }
 
@@ -592,9 +598,9 @@ func fromConfigToken(token config.Token) yazio.Token {
 	}
 }
 
-func parseDateArg(args []string) (time.Time, error) {
+func parseDateArg(args []string, now func() time.Time) (time.Time, error) {
 	if len(args) == 0 {
-		return time.Now().UTC(), nil
+		return todayDate(now()), nil
 	}
 	return parseDateFlag(args[0])
 }
@@ -604,7 +610,11 @@ func parseDateFlag(value string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid date %q: %w", value, err)
 	}
-	return date.UTC(), nil
+	return date, nil
+}
+
+func todayDate(now time.Time) time.Time {
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 }
 
 func writeJSON(out io.Writer, value any) error {

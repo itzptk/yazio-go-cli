@@ -338,5 +338,5 @@ func formatStatusError(method, endpoint string, message string, statusCode int, 
 }
 
 func formatDate(date time.Time) string {
-	return date.UTC().Format("2006-01-02")
+	return date.Format("2006-01-02")
 }

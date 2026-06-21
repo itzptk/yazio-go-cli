@@ -125,7 +125,7 @@ func TestAddAcceptsAllowedMealBuckets(t *testing.T) {
 				"--meal", meal,
 				"--amount", "100",
 				"--date", "2026-06-02",
-			}, func(string) apiClient { return fake })
+		}, func(string, yazio.OAuthCredentials) apiClient { return fake })
 
 			if err != nil {
 				t.Fatalf("Execute() error = %v", err)
@@ -151,7 +151,7 @@ func TestAddRejectsInvalidMealBucketBeforeAPI(t *testing.T) {
 		"--meal", "brunch",
 		"--amount", "100",
 		"--date", "2026-06-02",
-	}, func(string) apiClient { return fake })
+	}, func(string, yazio.OAuthCredentials) apiClient { return fake })
 
 	if err == nil {
 		t.Fatal("Execute() error = nil, want meal bucket validation error")
@@ -167,12 +167,12 @@ func TestAddRejectsInvalidMealBucketBeforeAPI(t *testing.T) {
 func executeCLI(t *testing.T, args []string) error {
 	t.Helper()
 
-	return executeCLIWithClient(t, args, func(baseURL string) apiClient {
-		return yazio.NewClient(baseURL)
+	return executeCLIWithClient(t, args, func(baseURL string, oauth yazio.OAuthCredentials) apiClient {
+		return yazio.NewClient(baseURL, yazio.WithOAuthCredentials(oauth))
 	})
 }
 
-func executeCLIWithClient(t *testing.T, args []string, clientFactory func(string) apiClient) error {
+func executeCLIWithClient(t *testing.T, args []string, clientFactory func(string, yazio.OAuthCredentials) apiClient) error {
 	t.Helper()
 
 	var out bytes.Buffer
