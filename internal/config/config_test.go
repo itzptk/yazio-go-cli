@@ -17,6 +17,10 @@ func TestSaveAndLoad(t *testing.T) {
 	want := File{
 		BaseURL: "https://yzapi.yazio.com/v15",
 		Output:  "json",
+		OAuth: &OAuth{
+			ClientID:     "test-client-id",
+			ClientSecret: "test-client-secret",
+		},
 		Token: &Token{
 			AccessToken:  "access-token",
 			RefreshToken: "refresh-token",
@@ -39,6 +43,15 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if got.Output != want.Output {
 		t.Fatalf("Output = %q, want %q", got.Output, want.Output)
+	}
+	if got.OAuth == nil {
+		t.Fatal("OAuth = nil, want OAuth credentials")
+	}
+	if got.OAuth.ClientID != want.OAuth.ClientID {
+		t.Fatalf("OAuth.ClientID = %q, want %q", got.OAuth.ClientID, want.OAuth.ClientID)
+	}
+	if got.OAuth.ClientSecret != want.OAuth.ClientSecret {
+		t.Fatalf("OAuth.ClientSecret = %q, want %q", got.OAuth.ClientSecret, want.OAuth.ClientSecret)
 	}
 	if got.Token == nil {
 		t.Fatal("Token = nil, want token")

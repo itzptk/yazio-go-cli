@@ -2,10 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/itzptk/yazio-go-cli/internal/config"
+	"github.com/itzptk/yazio-go-cli/internal/yazio"
 )
 
 func TestConfigInitWritesExampleFile(t *testing.T) {
@@ -33,6 +39,134 @@ func TestConfigInitWritesExampleFile(t *testing.T) {
 	if !strings.Contains(out.String(), configPath) {
 		t.Fatalf("output %q does not mention config path %q", out.String(), configPath)
 	}
+}
+
+func TestResolveOAuthCredentialsFromConfig(t *testing.T) {
+	unsetEnvForTest(t, "YAZIO_CLIENT_ID")
+	unsetEnvForTest(t, "YAZIO_CLIENT_SECRET")
+
+	got := resolveOAuthCredentials(config.File{
+		OAuth: &config.OAuth{
+			ClientID:     "config-client-id",
+			ClientSecret: "config-client-secret",
+		},
+	})
+
+	if got.ClientID != "config-client-id" {
+		t.Fatalf("ClientID = %q, want config-client-id", got.ClientID)
+	}
+	if got.ClientSecret != "config-client-secret" {
+		t.Fatalf("ClientSecret = %q, want config-client-secret", got.ClientSecret)
+	}
+}
+
+func TestResolveOAuthCredentialsFromEnvOverridesConfig(t *testing.T) {
+	t.Setenv("YAZIO_CLIENT_ID", "env-client-id")
+	t.Setenv("YAZIO_CLIENT_SECRET", "env-client-secret")
+
+	got := resolveOAuthCredentials(config.File{
+		OAuth: &config.OAuth{
+			ClientID:     "config-client-id",
+			ClientSecret: "config-client-secret",
+		},
+	})
+
+	if got.ClientID != "env-client-id" {
+		t.Fatalf("ClientID = %q, want env-client-id", got.ClientID)
+	}
+	if got.ClientSecret != "env-client-secret" {
+		t.Fatalf("ClientSecret = %q, want env-client-secret", got.ClientSecret)
+	}
+}
+
+func TestAuthLoginPassesEnvOAuthCredentialsToClientFactory(t *testing.T) {
+	t.Setenv("YAZIO_CLIENT_ID", "env-client-id")
+	t.Setenv("YAZIO_CLIENT_SECRET", "env-client-secret")
+
+	var gotOAuth yazio.OAuthCredentials
+	var out bytes.Buffer
+	cmd, err := newRootCommand(&out, "dev", func(_ string, oauth yazio.OAuthCredentials) apiClient {
+		gotOAuth = oauth
+		return &loginClient{
+			token: yazio.Token{
+				AccessToken:  "access",
+				RefreshToken: "refresh",
+				TokenType:    "Bearer",
+				ExpiresAt:    time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+			},
+		}
+	})
+	if err != nil {
+		t.Fatalf("newRootCommand() error = %v", err)
+	}
+	cmd.SetArgs([]string{
+		"--config", filepath.Join(t.TempDir(), "config.yaml"),
+		"auth", "login",
+		"--email", "user@example.com",
+		"--password", "password",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if gotOAuth.ClientID != "env-client-id" {
+		t.Fatalf("ClientID = %q, want env-client-id", gotOAuth.ClientID)
+	}
+	if gotOAuth.ClientSecret != "env-client-secret" {
+		t.Fatalf("ClientSecret = %q, want env-client-secret", gotOAuth.ClientSecret)
+	}
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+
+	value, ok := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("Unsetenv(%q) error = %v", key, err)
+	}
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(key, value)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
+}
+
+type loginClient struct {
+	token yazio.Token
+}
+
+func (f *loginClient) Login(context.Context, yazio.Credentials) (yazio.Token, error) {
+	return f.token, nil
+}
+
+func (f *loginClient) Refresh(context.Context, yazio.Token) (yazio.Token, error) {
+	return yazio.Token{}, errors.New("unexpected Refresh call")
+}
+
+func (f *loginClient) GetUser(context.Context, yazio.Token) (yazio.User, error) {
+	return yazio.User{}, errors.New("unexpected GetUser call")
+}
+
+func (f *loginClient) GetDailySummary(context.Context, yazio.Token, time.Time) (yazio.DailySummary, error) {
+	return yazio.DailySummary{}, errors.New("unexpected GetDailySummary call")
+}
+
+func (f *loginClient) GetConsumedItems(context.Context, yazio.Token, time.Time) (yazio.ConsumedItemsResponse, error) {
+	return yazio.ConsumedItemsResponse{}, errors.New("unexpected GetConsumedItems call")
+}
+
+func (f *loginClient) SearchProducts(context.Context, yazio.Token, yazio.SearchOptions) ([]yazio.ProductSearchResult, error) {
+	return nil, errors.New("unexpected SearchProducts call")
+}
+
+func (f *loginClient) AddConsumedItem(context.Context, yazio.Token, yazio.AddConsumedItemRequest) error {
+	return errors.New("unexpected AddConsumedItem call")
+}
+
+func (f *loginClient) RemoveConsumedItem(context.Context, yazio.Token, string) error {
+	return errors.New("unexpected RemoveConsumedItem call")
 }
 
 func TestConfigInitRefusesOverwriteWithoutForce(t *testing.T) {

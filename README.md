@@ -44,6 +44,7 @@
 
 ```bash
 yazio config init
+# Edit ~/.config/yazio-go-cli/config.yaml and set oauth.client_id / oauth.client_secret.
 yazio auth login --email you@example.com --password 'your-password'
 yazio auth status
 ```
@@ -51,6 +52,8 @@ yazio auth status
 Or provide credentials through environment variables:
 
 ```bash
+export YAZIO_CLIENT_ID='your-client-id'
+export YAZIO_CLIENT_SECRET='your-client-secret'
 export YAZIO_EMAIL=you@example.com
 export YAZIO_PASSWORD='your-password'
 yazio auth login
@@ -152,7 +155,11 @@ yazio --config /path/to/config.yaml ...
 |---|---|
 | `base_url` | Override the unofficial YAZIO API base URL |
 | `output` | Default output format: `table` or `json` |
+| `oauth.client_id` | OAuth client ID used for login and token refresh; can also be set with `YAZIO_CLIENT_ID` |
+| `oauth.client_secret` | OAuth client secret used for login and token refresh; can also be set with `YAZIO_CLIENT_SECRET` |
 | `token` | Populated automatically after `yazio auth login` |
+
+`yazio auth login` and automatic token refresh fail before contacting YAZIO if the OAuth client ID or secret is missing.
 
 ---
 

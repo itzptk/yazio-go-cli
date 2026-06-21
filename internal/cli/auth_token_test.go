@@ -39,7 +39,7 @@ func TestEnsureTokenRefreshesTokenWithoutExpiry(t *testing.T) {
 		cfgPath:       cfgPath,
 		cfg:           cfg,
 		baseURL:       cfg.BaseURL,
-		clientFactory: func(string) apiClient { return fake },
+		clientFactory: func(string, yazio.OAuthCredentials) apiClient { return fake },
 	}
 
 	token, err := app.ensureToken(context.Background())
@@ -80,7 +80,7 @@ func TestEnsureTokenWithoutExpiryAndRefreshTokenRequiresLogin(t *testing.T) {
 		cfgPath:       cfgPath,
 		cfg:           cfg,
 		baseURL:       cfg.BaseURL,
-		clientFactory: func(string) apiClient { return fake },
+		clientFactory: func(string, yazio.OAuthCredentials) apiClient { return fake },
 	}
 
 	_, err = app.ensureToken(context.Background())
@@ -104,7 +104,7 @@ func TestAuthStatusReportsTokenWithoutExpiryAsExpired(t *testing.T) {
   token_type: Bearer
 `)
 	var out bytes.Buffer
-	cmd, err := newRootCommand(&out, "dev", func(string) apiClient { return &refreshTokenClient{} })
+	cmd, err := newRootCommand(&out, "dev", func(string, yazio.OAuthCredentials) apiClient { return &refreshTokenClient{} })
 	if err != nil {
 		t.Fatalf("newRootCommand() error = %v", err)
 	}

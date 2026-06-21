@@ -8,9 +8,17 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func testOAuthCredentials() OAuthCredentials {
+	return OAuthCredentials{
+		ClientID:     "test-client-id",
+		ClientSecret: "test-client-secret",
+	}
+}
 
 func TestLogin(t *testing.T) {
 	t.Parallel()
@@ -36,13 +44,19 @@ func TestLogin(t *testing.T) {
 		if body["grant_type"] != "password" {
 			t.Fatalf("grant_type = %v, want password", body["grant_type"])
 		}
+		if body["client_id"] != "test-client-id" {
+			t.Fatalf("client_id = %v, want test-client-id", body["client_id"])
+		}
+		if body["client_secret"] != "test-client-secret" {
+			t.Fatalf("client_secret = %v, want test-client-secret", body["client_secret"])
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"access_token":"access","refresh_token":"refresh","token_type":"Bearer","expires_in":3600}`)
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL)
+	client := NewClient(server.URL, WithOAuthCredentials(testOAuthCredentials()))
 	got, err := client.Login(context.Background(), Credentials{Email: "user@example.com", Password: "super-secret"})
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
@@ -59,6 +73,99 @@ func TestLogin(t *testing.T) {
 	}
 	if time.Until(got.ExpiresAt) <= 59*time.Minute {
 		t.Fatalf("ExpiresAt = %s, want about one hour in the future", got.ExpiresAt)
+	}
+}
+
+func TestRefreshSendsOAuthCredentials(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Fatalf("path = %q, want /oauth/token", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", r.Method)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		if body["grant_type"] != "refresh_token" {
+			t.Fatalf("grant_type = %v, want refresh_token", body["grant_type"])
+		}
+		if body["refresh_token"] != "refresh-input" {
+			t.Fatalf("refresh_token = %v, want refresh-input", body["refresh_token"])
+		}
+		if body["client_id"] != "test-client-id" {
+			t.Fatalf("client_id = %v, want test-client-id", body["client_id"])
+		}
+		if body["client_secret"] != "test-client-secret" {
+			t.Fatalf("client_secret = %v, want test-client-secret", body["client_secret"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, WithOAuthCredentials(testOAuthCredentials()))
+	got, err := client.Refresh(context.Background(), Token{RefreshToken: "refresh-input"})
+	if err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+
+	if got.AccessToken != "new-access" {
+		t.Fatalf("AccessToken = %q, want new-access", got.AccessToken)
+	}
+	if got.RefreshToken != "new-refresh" {
+		t.Fatalf("RefreshToken = %q, want new-refresh", got.RefreshToken)
+	}
+}
+
+func TestLoginRequiresOAuthCredentialsBeforeRequest(t *testing.T) {
+	t.Parallel()
+
+	var requests int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requests, 1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.Login(context.Background(), Credentials{Email: "user@example.com", Password: "super-secret"})
+	if err == nil {
+		t.Fatal("Login() error = nil, want missing credentials error")
+	}
+	if !strings.Contains(err.Error(), "missing YAZIO OAuth credentials") {
+		t.Fatalf("Login() error = %q, want missing OAuth credentials", err)
+	}
+	if got := atomic.LoadInt64(&requests); got != 0 {
+		t.Fatalf("requests = %d, want 0", got)
+	}
+}
+
+func TestRefreshRequiresOAuthCredentialsBeforeRequest(t *testing.T) {
+	t.Parallel()
+
+	var requests int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requests, 1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.Refresh(context.Background(), Token{RefreshToken: "refresh-input"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want missing credentials error")
+	}
+	if !strings.Contains(err.Error(), "missing YAZIO OAuth credentials") {
+		t.Fatalf("Refresh() error = %q, want missing OAuth credentials", err)
+	}
+	if got := atomic.LoadInt64(&requests); got != 0 {
+		t.Fatalf("requests = %d, want 0", got)
 	}
 }
 

@@ -26,7 +26,8 @@ type App struct {
 	cfg           config.File
 	baseURL       string
 	output        string
-	clientFactory func(string) apiClient
+	oauth         yazio.OAuthCredentials
+	clientFactory func(string, yazio.OAuthCredentials) apiClient
 }
 
 type apiClient interface {
@@ -41,12 +42,12 @@ type apiClient interface {
 }
 
 func NewRootCommand(out io.Writer, version string) (*cobra.Command, error) {
-	return newRootCommand(out, version, func(baseURL string) apiClient {
-		return yazio.NewClient(baseURL)
+	return newRootCommand(out, version, func(baseURL string, oauth yazio.OAuthCredentials) apiClient {
+		return yazio.NewClient(baseURL, yazio.WithOAuthCredentials(oauth))
 	})
 }
 
-func newRootCommand(out io.Writer, version string, clientFactory func(string) apiClient) (*cobra.Command, error) {
+func newRootCommand(out io.Writer, version string, clientFactory func(string, yazio.OAuthCredentials) apiClient) (*cobra.Command, error) {
 	defaultConfigPath, err := config.DefaultPath()
 	if err != nil {
 		return nil, err
@@ -99,6 +100,7 @@ func newRootCommand(out io.Writer, version string, clientFactory func(string) ap
 			app.cfg = cfg
 			app.baseURL = cfg.BaseURL
 			app.output = cfg.Output
+			app.oauth = resolveOAuthCredentials(cfg)
 			return nil
 		},
 	}
@@ -445,7 +447,22 @@ func (a *App) newRemoveCommand() *cobra.Command {
 }
 
 func (a *App) client() apiClient {
-	return a.clientFactory(a.baseURL)
+	return a.clientFactory(a.baseURL, a.oauth)
+}
+
+func resolveOAuthCredentials(cfg config.File) yazio.OAuthCredentials {
+	var credentials yazio.OAuthCredentials
+	if cfg.OAuth != nil {
+		credentials.ClientID = cfg.OAuth.ClientID
+		credentials.ClientSecret = cfg.OAuth.ClientSecret
+	}
+	if value, ok := os.LookupEnv("YAZIO_CLIENT_ID"); ok {
+		credentials.ClientID = value
+	}
+	if value, ok := os.LookupEnv("YAZIO_CLIENT_SECRET"); ok {
+		credentials.ClientSecret = value
+	}
+	return credentials
 }
 
 func (a *App) ensureToken(ctx context.Context) (yazio.Token, error) {
