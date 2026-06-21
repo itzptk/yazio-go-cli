@@ -8,6 +8,12 @@ base_url: https://yzapi.yazio.com/v15
 # Valid values: table, json
 output: table
 
+# OAuth client credentials are required for `yazio auth login` and token refresh.
+# You can also provide them with YAZIO_CLIENT_ID and YAZIO_CLIENT_SECRET.
+# oauth:
+#   client_id: your-client-id
+#   client_secret: your-client-secret
+
 # Tokens are written here after `yazio auth login` succeeds.
 # Leave this section commented out when sharing the file.
 # token:

@@ -24,9 +24,15 @@ type Token struct {
 	ExpiresAt    time.Time `yaml:"expires_at"`
 }
 
+type OAuth struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+}
+
 type File struct {
 	BaseURL string `yaml:"base_url"`
 	Output  string `yaml:"output"`
+	OAuth   *OAuth `yaml:"oauth,omitempty"`
 	Token   *Token `yaml:"token,omitempty"`
 }
 
@@ -39,6 +45,12 @@ const ExampleFile = "# Example config for yazio-go-cli.\n" +
 	"# Default output mode for commands.\n" +
 	"# Valid values: table, json\n" +
 	"output: table\n" +
+	"\n" +
+	"# OAuth client credentials are required for `yazio auth login` and token refresh.\n" +
+	"# You can also provide them with YAZIO_CLIENT_ID and YAZIO_CLIENT_SECRET.\n" +
+	"# oauth:\n" +
+	"#   client_id: your-client-id\n" +
+	"#   client_secret: your-client-secret\n" +
 	"\n" +
 	"# Tokens are written here after `yazio auth login` succeeds.\n" +
 	"# Leave this section commented out when sharing the file.\n" +
