@@ -40,6 +40,8 @@ type apiClient interface {
 	RemoveConsumedItem(context.Context, yazio.Token, string) error
 }
 
+const allowedMealBuckets = "breakfast, lunch, dinner, snack"
+
 func NewRootCommand(out io.Writer, version string) (*cobra.Command, error) {
 	return newRootCommand(out, version, func(baseURL string) apiClient {
 		return yazio.NewClient(baseURL)
@@ -377,6 +379,9 @@ func (a *App) newAddCommand() *cobra.Command {
 			if productID == "" || meal == "" || amount <= 0 {
 				return errors.New("--product-id, --meal, and --amount are required")
 			}
+			if err := validateMealBucket(meal); err != nil {
+				return err
+			}
 			if serving != "" && servingQuantity <= 0 {
 				return errors.New("--serving-quantity must be greater than zero when --serving is set")
 			}
@@ -413,12 +418,21 @@ func (a *App) newAddCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&productID, "product-id", "", "Product ID returned by search")
-	cmd.Flags().StringVar(&meal, "meal", "", "Meal bucket: breakfast, lunch, dinner, snack")
+	cmd.Flags().StringVar(&meal, "meal", "", "Meal bucket: "+allowedMealBuckets)
 	cmd.Flags().Float64Var(&amount, "amount", 0, "Amount of the serving/base unit")
 	cmd.Flags().StringVar(&serving, "serving", "", "Serving unit, e.g. g")
 	cmd.Flags().Float64Var(&servingQuantity, "serving-quantity", 1, "Serving quantity multiplier")
 	cmd.Flags().StringVar(&dateValue, "date", time.Now().UTC().Format("2006-01-02"), "Diary date YYYY-MM-DD")
 	return cmd
+}
+
+func validateMealBucket(meal string) error {
+	switch meal {
+	case "breakfast", "lunch", "dinner", "snack":
+		return nil
+	default:
+		return fmt.Errorf("--meal must be one of: %s", allowedMealBuckets)
+	}
 }
 
 func (a *App) newRemoveCommand() *cobra.Command {
