@@ -27,6 +27,19 @@ func TestSaveAndLoad(t *testing.T) {
 			TokenType:    "Bearer",
 			ExpiresAt:    time.Unix(1_717_280_000, 0).UTC(),
 		},
+		Templates: map[string]MealTemplate{
+			"weekday-breakfast": {
+				ProductID: "11111111-1111-1111-1111-111111111111",
+				Meal:      "breakfast",
+				Amount:    100,
+				Serving:   "g",
+				ServingQuantity: func() *float64 {
+					v := 1.5
+					return &v
+				}(),
+				Notes: "weekday default",
+			},
+		},
 	}
 
 	if err := Save(path, want); err != nil {
@@ -61,6 +74,19 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if !got.Token.ExpiresAt.Equal(want.Token.ExpiresAt) {
 		t.Fatalf("ExpiresAt = %s, want %s", got.Token.ExpiresAt, want.Token.ExpiresAt)
+	}
+	template, ok := got.Templates["weekday-breakfast"]
+	if !ok {
+		t.Fatalf("template missing after load: %#v", got.Templates)
+	}
+	if template.ProductID != "11111111-1111-1111-1111-111111111111" || template.Meal != "breakfast" || template.Amount != 100 {
+		t.Fatalf("template = %#v, want product/meal/amount", template)
+	}
+	if template.Serving != "g" || template.ServingQuantity == nil || *template.ServingQuantity != 1.5 {
+		t.Fatalf("template serving = %#v, want g x 1.5", template)
+	}
+	if template.Notes != "weekday default" {
+		t.Fatalf("template notes = %q, want weekday default", template.Notes)
 	}
 }
 
@@ -138,7 +164,7 @@ func TestExampleFileParsesAsDefaultsWithoutToken(t *testing.T) {
 	if got.Token != nil {
 		t.Fatalf("Token = %#v, want nil", got.Token)
 	}
-	if !strings.Contains(ExampleFile, "base_url") || !strings.Contains(ExampleFile, "output") {
+	if !strings.Contains(ExampleFile, "base_url") || !strings.Contains(ExampleFile, "output") || !strings.Contains(ExampleFile, "templates") {
 		t.Fatalf("ExampleFile missing expected keys: %q", ExampleFile)
 	}
 }

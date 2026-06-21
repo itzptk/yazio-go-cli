@@ -29,11 +29,21 @@ type OAuth struct {
 	ClientSecret string `yaml:"client_secret"`
 }
 
+type MealTemplate struct {
+	ProductID       string   `yaml:"product_id" json:"product_id"`
+	Meal            string   `yaml:"meal" json:"meal"`
+	Amount          float64  `yaml:"amount" json:"amount"`
+	Serving         string   `yaml:"serving,omitempty" json:"serving,omitempty"`
+	ServingQuantity *float64 `yaml:"serving_quantity,omitempty" json:"serving_quantity,omitempty"`
+	Notes           string   `yaml:"notes,omitempty" json:"notes,omitempty"`
+}
+
 type File struct {
-	BaseURL string `yaml:"base_url"`
-	Output  string `yaml:"output"`
-	OAuth   *OAuth `yaml:"oauth,omitempty"`
-	Token   *Token `yaml:"token,omitempty"`
+	BaseURL   string                  `yaml:"base_url"`
+	Output    string                  `yaml:"output"`
+	OAuth     *OAuth                  `yaml:"oauth,omitempty"`
+	Token     *Token                  `yaml:"token,omitempty"`
+	Templates map[string]MealTemplate `yaml:"templates,omitempty"`
 }
 
 const ExampleFile = "# Example config for yazio-go-cli.\n" +
@@ -58,7 +68,17 @@ const ExampleFile = "# Example config for yazio-go-cli.\n" +
 	"#   access_token: your-access-token\n" +
 	"#   refresh_token: your-refresh-token\n" +
 	"#   token_type: Bearer\n" +
-	"#   expires_at: 2026-06-02T12:34:56Z\n"
+	"#   expires_at: 2026-06-02T12:34:56Z\n" +
+	"\n" +
+	"# Saved meal templates are managed with `yazio template ...` commands.\n" +
+	"# templates:\n" +
+	"#   weekday-breakfast:\n" +
+	"#     product_id: 11111111-1111-1111-1111-111111111111\n" +
+	"#     meal: breakfast\n" +
+	"#     amount: 100\n" +
+	"#     serving: g\n" +
+	"#     serving_quantity: 1\n" +
+	"#     notes: optional reminder\n"
 
 func DefaultFile() File {
 	return File{
