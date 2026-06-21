@@ -148,8 +148,8 @@ func TestSearchProducts(t *testing.T) {
 		if query.Get("countries") != "DE,US" {
 			t.Fatalf("countries = %q, want DE,US", query.Get("countries"))
 		}
-		if query.Get("locales") != "en_US,de_US" {
-			t.Fatalf("locales = %q, want en_US,de_US", query.Get("locales"))
+		if query.Get("locales") != "en_US,de_DE" {
+			t.Fatalf("locales = %q, want en_US,de_DE", query.Get("locales"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")

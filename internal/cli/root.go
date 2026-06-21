@@ -358,7 +358,7 @@ func (a *App) newSearchCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&sex, "sex", "male", "Profile sex to use for search ranking")
 	cmd.Flags().StringSliceVar(&countries, "countries", []string{"DE", "US"}, "Country codes for search")
-	cmd.Flags().StringSliceVar(&locales, "locales", []string{"en_US", "de_US"}, "Locales for search")
+	cmd.Flags().StringSliceVar(&locales, "locales", []string{"en_US", "de_DE"}, "Locales for search")
 	return cmd
 }
 
