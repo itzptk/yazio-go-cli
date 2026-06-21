@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -308,17 +309,75 @@ func (a *App) newConsumedCommand() *cobra.Command {
 			if a.output == "json" {
 				return writeJSON(a.out, items)
 			}
-			w := tabwriter.NewWriter(a.out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ENTRY ID\tMEAL\tPRODUCT ID\tAMOUNT\tSERVING")
-			for _, item := range items.Products {
-				serving := ""
-				if item.Serving != nil {
-					serving = *item.Serving
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%.2f\t%s\n", item.ID, item.Daytime, item.ProductID, item.Amount, serving)
-			}
-			return w.Flush()
+			return writeConsumedTable(a.out, items)
 		},
+	}
+}
+
+func writeConsumedTable(out io.Writer, items yazio.ConsumedItemsResponse) error {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ENTRY ID\tMEAL\tPRODUCT ID\tAMOUNT\tSERVING")
+	for _, item := range items.Products {
+		serving := ""
+		if item.Serving != nil {
+			serving = *item.Serving
+		}
+		writeConsumedTableRow(w, item.ID, item.Daytime, item.ProductID, fmt.Sprintf("%.2f", item.Amount), serving)
+	}
+	for _, item := range items.RecipePortions {
+		writeGenericConsumedTableRow(w, item)
+	}
+	for _, item := range items.SimpleProducts {
+		writeGenericConsumedTableRow(w, item)
+	}
+	return w.Flush()
+}
+
+func writeGenericConsumedTableRow(w io.Writer, item any) {
+	fields := mapFields(item)
+	writeConsumedTableRow(
+		w,
+		fieldValue(fields, "id", "entry_id", "uuid"),
+		fieldValue(fields, "daytime", "meal"),
+		fieldValue(fields, "product_id", "recipe_id", "simple_product_id"),
+		tableAmount(fields),
+		fieldValue(fields, "serving"),
+	)
+}
+
+func writeConsumedTableRow(w io.Writer, id, meal, productID, amount, serving string) {
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", id, meal, productID, amount, serving)
+}
+
+func tableAmount(fields map[string]any) string {
+	value, ok := fields["amount"]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case float64:
+		return fmt.Sprintf("%.2f", typed)
+	case float32:
+		return fmt.Sprintf("%.2f", typed)
+	case int:
+		return fmt.Sprintf("%.2f", float64(typed))
+	case int64:
+		return fmt.Sprintf("%.2f", float64(typed))
+	case int32:
+		return fmt.Sprintf("%.2f", float64(typed))
+	case uint:
+		return fmt.Sprintf("%.2f", float64(typed))
+	case uint64:
+		return fmt.Sprintf("%.2f", float64(typed))
+	case uint32:
+		return fmt.Sprintf("%.2f", float64(typed))
+	case string:
+		if parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+			return fmt.Sprintf("%.2f", parsed)
+		}
+		return typed
+	default:
+		return fmt.Sprint(typed)
 	}
 }
 
