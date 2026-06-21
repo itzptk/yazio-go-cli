@@ -39,7 +39,8 @@ func TestConfigInitRefusesOverwriteWithoutForce(t *testing.T) {
 	t.Parallel()
 
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(configPath, []byte("output: json\n"), 0o600); err != nil {
+	original := "output: json\n"
+	if err := os.WriteFile(configPath, []byte(original), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
@@ -56,6 +57,47 @@ func TestConfigInitRefusesOverwriteWithoutForce(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("error = %q, want already exists", err)
+	}
+	content, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile() error = %v", readErr)
+	}
+	if string(content) != original {
+		t.Fatalf("config content = %q, want unchanged %q", string(content), original)
+	}
+}
+
+func TestConfigInitForceOverwritesMalformedConfig(t *testing.T) {
+	t.Parallel()
+
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("base_url: [\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	cmd, err := NewRootCommand(&out, "dev")
+	if err != nil {
+		t.Fatalf("NewRootCommand() error = %v", err)
+	}
+	cmd.SetArgs([]string{"--config", configPath, "config", "init", "--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(content), "base_url:") {
+		t.Fatalf("config file missing base_url: %q", string(content))
+	}
+	if !strings.Contains(string(content), "output: table") {
+		t.Fatalf("config file missing default output: %q", string(content))
+	}
+	if !strings.Contains(out.String(), configPath) {
+		t.Fatalf("output %q does not mention config path %q", out.String(), configPath)
 	}
 }
 
