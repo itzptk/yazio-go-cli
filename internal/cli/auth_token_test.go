@@ -52,15 +52,64 @@ func TestEnsureTokenRefreshesTokenWithoutExpiry(t *testing.T) {
 	if fake.refreshInput.AccessToken != "old-access" || fake.refreshInput.RefreshToken != "refresh-token" {
 		t.Fatalf("Refresh input = %#v, want old stored token", fake.refreshInput)
 	}
-	if token.AccessToken != "new-access" || !token.ExpiresAt.Equal(refreshedExpiresAt) {
+	if token.AccessToken != "new-access" || token.RefreshToken != "new-refresh" || !token.ExpiresAt.Equal(refreshedExpiresAt) {
 		t.Fatalf("token = %#v, want refreshed token", token)
 	}
 	saved, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load(saved) error = %v", err)
 	}
-	if saved.Token == nil || saved.Token.AccessToken != "new-access" || !saved.Token.ExpiresAt.Equal(refreshedExpiresAt) {
+	if saved.Token == nil || saved.Token.AccessToken != "new-access" || saved.Token.RefreshToken != "new-refresh" || !saved.Token.ExpiresAt.Equal(refreshedExpiresAt) {
 		t.Fatalf("saved token = %#v, want refreshed token", saved.Token)
+	}
+}
+
+func TestEnsureTokenPreservesRefreshTokenWhenRefreshOmitsReplacement(t *testing.T) {
+	t.Parallel()
+
+	cfgPath := writeRawTokenConfigForTest(t, `token:
+  access_token: old-access
+  refresh_token: refresh-token
+  token_type: Bearer
+`)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	refreshedExpiresAt := time.Date(2026, 6, 5, 13, 0, 0, 0, time.UTC)
+	fake := &refreshTokenClient{
+		refreshedToken: yazio.Token{
+			AccessToken: "new-access",
+			TokenType:   "Bearer",
+			ExpiresAt:   refreshedExpiresAt,
+		},
+	}
+	app := &App{
+		cfgPath:       cfgPath,
+		cfg:           cfg,
+		baseURL:       cfg.BaseURL,
+		clientFactory: func(string) apiClient { return fake },
+	}
+
+	token, err := app.ensureToken(context.Background())
+	if err != nil {
+		t.Fatalf("ensureToken() error = %v", err)
+	}
+	if fake.refreshCalls != 1 {
+		t.Fatalf("Refresh calls = %d, want 1", fake.refreshCalls)
+	}
+	if fake.refreshInput.RefreshToken != "refresh-token" {
+		t.Fatalf("Refresh input = %#v, want old refresh token", fake.refreshInput)
+	}
+	if token.AccessToken != "new-access" || token.RefreshToken != "refresh-token" || !token.ExpiresAt.Equal(refreshedExpiresAt) {
+		t.Fatalf("token = %#v, want refreshed token with preserved refresh token", token)
+	}
+	saved, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load(saved) error = %v", err)
+	}
+	if saved.Token == nil || saved.Token.AccessToken != "new-access" || saved.Token.RefreshToken != "refresh-token" || !saved.Token.ExpiresAt.Equal(refreshedExpiresAt) {
+		t.Fatalf("saved token = %#v, want refreshed token with preserved refresh token", saved.Token)
 	}
 }
 
