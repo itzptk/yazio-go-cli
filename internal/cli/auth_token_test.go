@@ -88,7 +88,7 @@ func TestEnsureTokenPreservesRefreshTokenWhenRefreshOmitsReplacement(t *testing.
 		cfgPath:       cfgPath,
 		cfg:           cfg,
 		baseURL:       cfg.BaseURL,
-		clientFactory: func(string) apiClient { return fake },
+			clientFactory: func(string, yazio.OAuthCredentials) apiClient { return fake },
 	}
 
 	token, err := app.ensureToken(context.Background())

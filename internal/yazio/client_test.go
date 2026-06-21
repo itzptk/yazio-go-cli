@@ -327,6 +327,91 @@ func TestAddConsumedItem(t *testing.T) {
 	}
 }
 
+func TestDiaryRequestDatesKeepProvidedCalendarDate(t *testing.T) {
+	t.Parallel()
+
+	loc := time.FixedZone("UTC+14", 14*60*60)
+	date := time.Date(2026, 1, 1, 0, 30, 0, 0, loc)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		call   func(*Client) error
+	}{
+		{
+			name:   "daily summary",
+			method: http.MethodGet,
+			path:   "/user/widgets/daily-summary",
+			call: func(client *Client) error {
+				_, err := client.GetDailySummary(context.Background(), Token{AccessToken: "access"}, date)
+				return err
+			},
+		},
+		{
+			name:   "consumed items",
+			method: http.MethodGet,
+			path:   "/user/consumed-items",
+			call: func(client *Client) error {
+				_, err := client.GetConsumedItems(context.Background(), Token{AccessToken: "access"}, date)
+				return err
+			},
+		},
+		{
+			name:   "add consumed item",
+			method: http.MethodPost,
+			path:   "/user/consumed-items",
+			call: func(client *Client) error {
+				return client.AddConsumedItem(context.Background(), Token{AccessToken: "access"}, AddConsumedItemRequest{
+					ID:        "22222222-2222-2222-2222-222222222222",
+					ProductID: "11111111-1111-1111-1111-111111111111",
+					Date:      date,
+					Daytime:   "breakfast",
+					Amount:    120,
+				})
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != tt.method {
+					t.Fatalf("method = %q, want %s", r.Method, tt.method)
+				}
+				if r.URL.Path != tt.path {
+					t.Fatalf("path = %q, want %s", r.URL.Path, tt.path)
+				}
+				if tt.method == http.MethodGet {
+					if r.URL.Query().Get("date") != "2026-01-01" {
+						t.Fatalf("date = %q, want 2026-01-01", r.URL.Query().Get("date"))
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{}`)
+					return
+				}
+
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("ReadAll() error = %v", err)
+				}
+				if !strings.Contains(string(body), `"date":"2026-01-01"`) {
+					t.Fatalf("body = %s, want date 2026-01-01", body)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+
+			client := NewClient(server.URL)
+			if err := tt.call(client); err != nil {
+				t.Fatalf("call() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestRemoveConsumedItem(t *testing.T) {
 	t.Parallel()
 

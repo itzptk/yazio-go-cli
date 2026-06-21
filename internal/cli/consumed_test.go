@@ -47,7 +47,7 @@ func TestConsumedTableIncludesAllDiaryItemTypes(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	cmd, err := newRootCommand(&out, "dev", func(baseURL string) apiClient { return fake })
+	cmd, err := newRootCommand(&out, "dev", func(baseURL string, _ yazio.OAuthCredentials) apiClient { return fake })
 	if err != nil {
 		t.Fatalf("newRootCommand() error = %v", err)
 	}

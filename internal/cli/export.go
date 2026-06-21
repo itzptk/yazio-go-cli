@@ -35,7 +35,7 @@ func (a *App) newExportDiaryCommand() *cobra.Command {
 		Short: "Export consumed diary entries as CSV",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dates, err := resolveDiaryExportDates(args, fromValue, toValue)
+			dates, err := resolveDiaryExportDates(args, fromValue, toValue, a.now)
 			if err != nil {
 				return err
 			}
@@ -117,7 +117,7 @@ type datedConsumedItems struct {
 
 const maxDiaryExportDays = 366
 
-func resolveDiaryExportDates(args []string, fromValue, toValue string) ([]time.Time, error) {
+func resolveDiaryExportDates(args []string, fromValue, toValue string, now func() time.Time) ([]time.Time, error) {
 	if len(args) > 0 && (fromValue != "" || toValue != "") {
 		return nil, errors.New("pass either a positional date or --from/--to, not both")
 	}
@@ -131,7 +131,7 @@ func resolveDiaryExportDates(args []string, fromValue, toValue string) ([]time.T
 	}
 
 	if fromValue == "" && toValue == "" {
-		return []time.Time{time.Now().UTC()}, nil
+		return []time.Time{todayDate(now())}, nil
 	}
 	if fromValue == "" {
 		fromValue = toValue
