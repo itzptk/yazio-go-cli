@@ -8,10 +8,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/itzptk/yazio-go-cli/internal/config"
@@ -137,6 +139,7 @@ func newRootCommandWithClock(out io.Writer, version string, clientFactory func(s
 	cmd.AddCommand(app.newSearchCommand())
 	cmd.AddCommand(app.newAddCommand())
 	cmd.AddCommand(app.newRemoveCommand())
+	cmd.AddCommand(app.newTemplateCommand())
 
 	return cmd, nil
 }
@@ -480,7 +483,7 @@ func (a *App) newAddCommand() *cobra.Command {
 			}
 
 			entryID := uuid.NewString()
-			if err := a.client().AddConsumedItem(cmd.Context(), token, yazio.AddConsumedItemRequest{
+			if err := a.addConsumedItem(cmd.Context(), token, yazio.AddConsumedItemRequest{
 				ID:              entryID,
 				ProductID:       productID,
 				Date:            date,
@@ -513,6 +516,243 @@ func validateMealBucket(meal string) error {
 	}
 }
 
+func (a *App) newTemplateCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "template", Short: "Manage and apply saved meal templates"}
+	cmd.AddCommand(a.newTemplateCreateCommand())
+	cmd.AddCommand(a.newTemplateListCommand())
+	cmd.AddCommand(a.newTemplateRemoveCommand())
+	cmd.AddCommand(a.newTemplateAddCommand())
+	return cmd
+}
+
+func (a *App) newTemplateCreateCommand() *cobra.Command {
+	var productID string
+	var meal string
+	var amount float64
+	var serving string
+	var servingQuantity float64
+	var notes string
+
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create or replace a saved meal template",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errors.New("template name is required")
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("expected one template name, got %d arguments", len(args))
+			}
+			_, err := normalizeTemplateName(args[0])
+			return err
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := normalizeTemplateName(args[0])
+			if err != nil {
+				return err
+			}
+
+			var quantityPtr *float64
+			if serving != "" {
+				quantityPtr = &servingQuantity
+			}
+			template := config.MealTemplate{
+				ProductID:       productID,
+				Meal:            meal,
+				Amount:          amount,
+				Serving:         serving,
+				ServingQuantity: quantityPtr,
+				Notes:           notes,
+			}
+			if err := validateMealTemplate(template); err != nil {
+				return err
+			}
+			if a.cfg.Templates == nil {
+				a.cfg.Templates = map[string]config.MealTemplate{}
+			}
+			a.cfg.Templates[name] = template
+			if err := config.Save(a.cfgPath, a.cfg); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "saved template %s\n", name)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&productID, "product-id", "", "Product ID returned by search")
+	cmd.Flags().StringVar(&meal, "meal", "", "Meal bucket: "+allowedMealBuckets)
+	cmd.Flags().Float64Var(&amount, "amount", 0, "Amount of the serving/base unit")
+	cmd.Flags().StringVar(&serving, "serving", "", "Serving unit, e.g. g")
+	cmd.Flags().Float64Var(&servingQuantity, "serving-quantity", 1, "Serving quantity multiplier")
+	cmd.Flags().StringVar(&notes, "notes", "", "Optional notes for this template")
+	return cmd
+}
+
+func (a *App) newTemplateListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List saved meal templates",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			templates := a.cfg.Templates
+			if templates == nil {
+				templates = map[string]config.MealTemplate{}
+			}
+			if a.output == "json" {
+				return writeJSON(a.out, templates)
+			}
+			w := tabwriter.NewWriter(a.out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tMEAL\tPRODUCT ID\tAMOUNT\tSERVING\tNOTES")
+			for _, name := range sortedTemplateNames(templates) {
+				template := templates[name]
+				serving := template.Serving
+				if template.ServingQuantity != nil {
+					serving = fmt.Sprintf("%s x %.2f", serving, *template.ServingQuantity)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%.2f\t%s\t%s\n", name, template.Meal, template.ProductID, template.Amount, strings.TrimSpace(serving), template.Notes)
+			}
+			return w.Flush()
+		},
+	}
+}
+
+func (a *App) newTemplateRemoveCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "remove <name>",
+		Short: "Remove a saved meal template",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errors.New("template name is required")
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("expected one template name, got %d arguments", len(args))
+			}
+			_, err := normalizeTemplateName(args[0])
+			return err
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := normalizeTemplateName(args[0])
+			if err != nil {
+				return err
+			}
+			if _, ok := a.cfg.Templates[name]; !ok {
+				return fmt.Errorf("template %q not found", name)
+			}
+			delete(a.cfg.Templates, name)
+			if len(a.cfg.Templates) == 0 {
+				a.cfg.Templates = nil
+			}
+			if err := config.Save(a.cfgPath, a.cfg); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.out, "removed template %s\n", name)
+			return nil
+		},
+	}
+}
+
+func (a *App) newTemplateAddCommand() *cobra.Command {
+	var dateValue string
+	var mealOverride string
+
+	cmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add a saved meal template to the diary",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return errors.New("template name is required")
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("expected one template name, got %d arguments", len(args))
+			}
+			_, err := normalizeTemplateName(args[0])
+			return err
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := normalizeTemplateName(args[0])
+			if err != nil {
+				return err
+			}
+			template, ok := a.cfg.Templates[name]
+			if !ok {
+				return fmt.Errorf("template %q not found", name)
+			}
+			if err := validateMealTemplate(template); err != nil {
+				return fmt.Errorf("invalid template %q: %w", name, err)
+			}
+			date, err := parseDateFlag(dateValue)
+			if err != nil {
+				return err
+			}
+			token, err := a.ensureToken(cmd.Context())
+			if err != nil {
+				return err
+			}
+
+			meal := template.Meal
+			if mealOverride != "" {
+				meal = mealOverride
+			}
+			if err := validateMealBucket(meal); err != nil {
+				return err
+			}
+			var servingPtr *string
+			if template.Serving != "" {
+				servingPtr = &template.Serving
+			}
+			entryID := uuid.NewString()
+			if err := a.addConsumedItem(cmd.Context(), token, yazio.AddConsumedItemRequest{
+				ID:              entryID,
+				ProductID:       template.ProductID,
+				Date:            date,
+				Daytime:         meal,
+				Amount:          template.Amount,
+				Serving:         servingPtr,
+				ServingQuantity: template.ServingQuantity,
+			}); err != nil {
+				return err
+			}
+			result := templateAddResult{
+				EntryID:         entryID,
+				Template:        name,
+				Date:            date.Format("2006-01-02"),
+				Meal:            meal,
+				ProductID:       template.ProductID,
+				Amount:          template.Amount,
+				Serving:         servingPtr,
+				ServingQuantity: template.ServingQuantity,
+			}
+			if a.output == "json" {
+				return writeJSON(a.out, result)
+			}
+			w := tabwriter.NewWriter(a.out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "ENTRY ID\tTEMPLATE\tDATE\tMEAL\tPRODUCT ID\tAMOUNT\tSERVING")
+			serving := ""
+			if result.Serving != nil {
+				serving = *result.Serving
+				if result.ServingQuantity != nil {
+					serving = fmt.Sprintf("%s x %.2f", serving, *result.ServingQuantity)
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.2f\t%s\n", result.EntryID, result.Template, result.Date, result.Meal, result.ProductID, result.Amount, serving)
+			return w.Flush()
+		},
+	}
+	cmd.Flags().StringVar(&dateValue, "date", todayDate(a.now()).Format("2006-01-02"), "Diary date YYYY-MM-DD")
+	cmd.Flags().StringVar(&mealOverride, "meal", "", "Override the template meal bucket")
+	return cmd
+}
+
+type templateAddResult struct {
+	EntryID         string   `json:"entry_id"`
+	Template        string   `json:"template"`
+	Date            string   `json:"date"`
+	Meal            string   `json:"meal"`
+	ProductID       string   `json:"product_id"`
+	Amount          float64  `json:"amount"`
+	Serving         *string  `json:"serving,omitempty"`
+	ServingQuantity *float64 `json:"serving_quantity,omitempty"`
+}
+
 func (a *App) newRemoveCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <entry-id>",
@@ -534,6 +774,10 @@ func (a *App) newRemoveCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func (a *App) addConsumedItem(ctx context.Context, token yazio.Token, entry yazio.AddConsumedItemRequest) error {
+	return a.client().AddConsumedItem(ctx, token, entry)
 }
 
 func (a *App) client() apiClient {
@@ -615,6 +859,48 @@ func parseDateFlag(value string) (time.Time, error) {
 
 func todayDate(now time.Time) time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+}
+
+func normalizeTemplateName(value string) (string, error) {
+	name := strings.TrimSpace(value)
+	if name == "" {
+		return "", errors.New("template name is required")
+	}
+	if name != value {
+		return "", fmt.Errorf("invalid template name %q: leading or trailing whitespace is not allowed", value)
+	}
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return "", fmt.Errorf("invalid template name %q: control characters are not allowed", value)
+	}
+	return name, nil
+}
+
+func sortedTemplateNames(templates map[string]config.MealTemplate) []string {
+	names := make([]string, 0, len(templates))
+	for name := range templates {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func validateMealTemplate(template config.MealTemplate) error {
+	if template.ProductID == "" || template.Meal == "" || template.Amount <= 0 {
+		return errors.New("--product-id, --meal, and --amount are required")
+	}
+	if err := validateMealBucket(template.Meal); err != nil {
+		return err
+	}
+	if template.Serving != "" {
+		if template.ServingQuantity == nil || *template.ServingQuantity <= 0 {
+			return errors.New("--serving-quantity must be greater than zero when --serving is set")
+		}
+		return nil
+	}
+	if template.ServingQuantity != nil {
+		return errors.New("--serving is required when --serving-quantity is set")
+	}
+	return nil
 }
 
 func writeJSON(out io.Writer, value any) error {
