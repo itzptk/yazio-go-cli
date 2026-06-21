@@ -67,7 +67,7 @@ func (a *App) newExportDiaryCommand() *cobra.Command {
 			if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(filePath, csvOutput.Bytes(), 0o644); err != nil {
+			if err := writePrivateFile(filePath, csvOutput.Bytes()); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(a.out, "exported %d diary entries to %s\n", count, filePath)
@@ -78,6 +78,36 @@ func (a *App) newExportDiaryCommand() *cobra.Command {
 	cmd.Flags().StringVar(&toValue, "to", "", "End date YYYY-MM-DD for an inclusive export range")
 	cmd.Flags().StringVar(&filePath, "file", "", "Write CSV to a file instead of stdout")
 	return cmd
+}
+
+func writePrivateFile(path string, content []byte) (err error) {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := file.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+
+	if err := file.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return err
+	}
+	n, err := file.Write(content)
+	if err != nil {
+		return err
+	}
+	if n != len(content) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 type datedConsumedItems struct {
