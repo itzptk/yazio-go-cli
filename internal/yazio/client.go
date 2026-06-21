@@ -136,7 +136,7 @@ func (c *Client) SearchProducts(ctx context.Context, token Token, opts SearchOpt
 	values.Set("countries", strings.Join(countries, ","))
 	locales := opts.Locales
 	if len(locales) == 0 {
-		locales = []string{"en_US", "de_US"}
+		locales = []string{"en_US", "de_DE"}
 	}
 	values.Set("locales", strings.Join(locales, ","))
 
