@@ -14,26 +14,44 @@ import (
 )
 
 const (
-	defaultClientID       = "1_4hiybetvfksgw40o0sog4s884kwc840wwso8go4k8c04goo4c"
-	defaultClientSecret   = "6rok2m65xuskgkgogw40wkkk8sw0osg84s8cggsc4woos4s8o"
 	getRequestMaxAttempts = 3
 	getRetryBaseDelay     = 100 * time.Millisecond
+
+	missingOAuthCredentialsHint = "set oauth.client_id/oauth.client_secret in config or YAZIO_CLIENT_ID/YAZIO_CLIENT_SECRET"
 )
 
-type Client struct {
-	baseURL    string
-	httpClient *http.Client
+type OAuthCredentials struct {
+	ClientID     string
+	ClientSecret string
 }
 
-func NewClient(baseURL string) *Client {
+type ClientOption func(*Client)
+
+type Client struct {
+	baseURL          string
+	httpClient       *http.Client
+	oauthCredentials OAuthCredentials
+}
+
+func WithOAuthCredentials(credentials OAuthCredentials) ClientOption {
+	return func(c *Client) {
+		c.oauthCredentials = credentials
+	}
+}
+
+func NewClient(baseURL string, opts ...ClientOption) *Client {
 	baseURL = strings.TrimRight(baseURL, "/")
 	if baseURL == "" {
 		baseURL = "https://yzapi.yazio.com/v15"
 	}
-	return &Client{
+	client := &Client{
 		baseURL:    baseURL,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
+	for _, opt := range opts {
+		opt(client)
+	}
+	return client
 }
 
 func (c *Client) buildURL(endpoint string, query url.Values) (string, error) {
@@ -62,9 +80,13 @@ type tokenResponse struct {
 }
 
 func (c *Client) Login(ctx context.Context, creds Credentials) (Token, error) {
+	oauthCredentials, err := c.validOAuthCredentials()
+	if err != nil {
+		return Token{}, err
+	}
 	return c.fetchToken(ctx, map[string]any{
-		"client_id":     defaultClientID,
-		"client_secret": defaultClientSecret,
+		"client_id":     oauthCredentials.ClientID,
+		"client_secret": oauthCredentials.ClientSecret,
 		"username":      creds.Email,
 		"password":      creds.Password,
 		"grant_type":    "password",
@@ -72,12 +94,34 @@ func (c *Client) Login(ctx context.Context, creds Credentials) (Token, error) {
 }
 
 func (c *Client) Refresh(ctx context.Context, token Token) (Token, error) {
+	oauthCredentials, err := c.validOAuthCredentials()
+	if err != nil {
+		return Token{}, err
+	}
 	return c.fetchToken(ctx, map[string]any{
-		"client_id":     defaultClientID,
-		"client_secret": defaultClientSecret,
+		"client_id":     oauthCredentials.ClientID,
+		"client_secret": oauthCredentials.ClientSecret,
 		"refresh_token": token.RefreshToken,
 		"grant_type":    "refresh_token",
 	})
+}
+
+func (c *Client) validOAuthCredentials() (OAuthCredentials, error) {
+	credentials := OAuthCredentials{
+		ClientID:     strings.TrimSpace(c.oauthCredentials.ClientID),
+		ClientSecret: strings.TrimSpace(c.oauthCredentials.ClientSecret),
+	}
+	var missing []string
+	if credentials.ClientID == "" {
+		missing = append(missing, "client ID")
+	}
+	if credentials.ClientSecret == "" {
+		missing = append(missing, "client secret")
+	}
+	if len(missing) > 0 {
+		return OAuthCredentials{}, fmt.Errorf("missing YAZIO OAuth credentials: %s required (%s)", strings.Join(missing, " and "), missingOAuthCredentialsHint)
+	}
+	return credentials, nil
 }
 
 func (c *Client) fetchToken(ctx context.Context, payload map[string]any) (Token, error) {
