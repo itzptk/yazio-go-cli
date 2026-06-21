@@ -85,6 +85,8 @@ type datedConsumedItems struct {
 	Items yazio.ConsumedItemsResponse
 }
 
+const maxDiaryExportDays = 366
+
 func resolveDiaryExportDates(args []string, fromValue, toValue string) ([]time.Time, error) {
 	if len(args) > 0 && (fromValue != "" || toValue != "") {
 		return nil, errors.New("pass either a positional date or --from/--to, not both")
@@ -122,7 +124,7 @@ func resolveDiaryExportDates(args []string, fromValue, toValue string) ([]time.T
 
 	dates := make([]time.Time, 0, int(to.Sub(from).Hours()/24)+1)
 	for date := from; !date.After(to); date = date.AddDate(0, 0, 1) {
-		if len(dates) >= 366 {
+		if len(dates) == maxDiaryExportDays {
 			return nil, errors.New("diary export range cannot exceed 366 days")
 		}
 		dates = append(dates, date)

@@ -188,6 +188,36 @@ func TestDiaryCSVExportRejectsFromAfterTo(t *testing.T) {
 	}
 }
 
+func TestResolveDiaryExportDatesAllows366DayRange(t *testing.T) {
+	t.Parallel()
+
+	dates, err := resolveDiaryExportDates(nil, "2024-01-01", "2024-12-31")
+	if err != nil {
+		t.Fatalf("resolveDiaryExportDates() error = %v, want nil", err)
+	}
+	if len(dates) != maxDiaryExportDays {
+		t.Fatalf("len(dates) = %d, want %d", len(dates), maxDiaryExportDays)
+	}
+	if got := dates[0].Format("2006-01-02"); got != "2024-01-01" {
+		t.Fatalf("first date = %s, want 2024-01-01", got)
+	}
+	if got := dates[len(dates)-1].Format("2006-01-02"); got != "2024-12-31" {
+		t.Fatalf("last date = %s, want 2024-12-31", got)
+	}
+}
+
+func TestResolveDiaryExportDatesRejects367DayRange(t *testing.T) {
+	t.Parallel()
+
+	_, err := resolveDiaryExportDates(nil, "2024-01-01", "2025-01-01")
+	if err == nil {
+		t.Fatal("resolveDiaryExportDates() error = nil, want range validation error")
+	}
+	if !strings.Contains(err.Error(), "diary export range cannot exceed 366 days") {
+		t.Fatalf("error = %q, want range limit validation", err)
+	}
+}
+
 func writeTestConfigWithToken(t *testing.T) string {
 	t.Helper()
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
