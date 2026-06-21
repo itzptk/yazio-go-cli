@@ -72,6 +72,13 @@ func newRootCommand(out io.Writer, version string, clientFactory func(string) ap
 			}
 			app.cfgPath = cfgPath
 
+			if isConfigInitCommand(cmd) {
+				app.cfg = config.DefaultFile()
+				app.baseURL = app.cfg.BaseURL
+				app.output = app.cfg.Output
+				return nil
+			}
+
 			cfg, err := config.Load(cfgPath)
 			if err != nil {
 				return err
@@ -121,6 +128,10 @@ func newRootCommand(out io.Writer, version string, clientFactory func(string) ap
 	cmd.AddCommand(app.newRemoveCommand())
 
 	return cmd, nil
+}
+
+func isConfigInitCommand(cmd *cobra.Command) bool {
+	return cmd.Name() == "init" && cmd.Parent() != nil && cmd.Parent().Name() == "config"
 }
 
 func (a *App) newAuthCommand() *cobra.Command {
