@@ -33,6 +33,7 @@
 | 🍽️ | **Diary entries** | List consumed diary items for a date |
 | 🔍 | **Product search** | Search products in the YAZIO database |
 | ➕ | **Add diary items** | Add consumed products with meal, serving, amount, and date metadata |
+| 🧩 | **Saved meal templates** | Save common product/meal combinations locally and add them later |
 | 🗑️ | **Remove entries** | Remove consumed diary entries by entry ID |
 | ⚙️ | **Config bootstrap** | Generate a starter config with `yazio config init` |
 | 🧾 | **Scriptable output** | Use table output for humans or JSON output for automation |
@@ -70,6 +71,8 @@ yazio auth login
 | `yazio export diary 2026-06-02` | Export one diary day as CSV to stdout |
 | `yazio export diary --from 2026-06-01 --to 2026-06-07 --file diary.csv` | Export an inclusive diary date range to a CSV file |
 | `yazio search banana` | Search products in the YAZIO database |
+| `yazio template list` | List saved meal templates |
+| `yazio template add weekday-breakfast --date 2026-06-02` | Add a saved meal template to the diary |
 | `yazio --output json summary 2026-06-02` | Emit JSON for scripting |
 
 CSV exports write this header:
@@ -92,6 +95,23 @@ yazio add \
   --date 2026-06-02
 
 yazio remove 22222222-2222-2222-2222-222222222222
+```
+
+Save and reuse common meals locally:
+
+```bash
+yazio template create weekday-breakfast \
+  --product-id 11111111-1111-1111-1111-111111111111 \
+  --meal breakfast \
+  --amount 100 \
+  --serving g \
+  --serving-quantity 1 \
+  --notes "weekday default"
+
+yazio template list
+yazio template add weekday-breakfast --date 2026-06-02
+yazio template add weekday-breakfast --meal lunch
+yazio template remove weekday-breakfast
 ```
 
 ---
@@ -158,6 +178,7 @@ yazio --config /path/to/config.yaml ...
 | `oauth.client_id` | OAuth client ID used for login and token refresh; can also be set with `YAZIO_CLIENT_ID` |
 | `oauth.client_secret` | OAuth client secret used for login and token refresh; can also be set with `YAZIO_CLIENT_SECRET` |
 | `token` | Populated automatically after `yazio auth login` |
+| `templates` | Local saved meal templates managed by `yazio template` commands |
 
 `yazio auth login` and automatic token refresh fail before contacting YAZIO if the OAuth client ID or secret is missing.
 
