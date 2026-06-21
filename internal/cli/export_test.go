@@ -125,6 +125,12 @@ func TestDiaryCSVExportWritesToFileWhenRequested(t *testing.T) {
 		t.Fatalf("newRootCommand() error = %v", err)
 	}
 	exportPath := filepath.Join(t.TempDir(), "diary.csv")
+	if err := os.WriteFile(exportPath, []byte("old export"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.Chmod(exportPath, 0o644); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
 	cmd.SetArgs([]string{"--config", cfgPath, "export", "diary", "2026-06-03", "--file", exportPath})
 
 	if err := cmd.Execute(); err != nil {
@@ -140,6 +146,13 @@ func TestDiaryCSVExportWritesToFileWhenRequested(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "2026-06-03,product,snack,entry-3") {
 		t.Fatalf("file content = %q, want exported diary row", string(content))
+	}
+	info, err := os.Stat(exportPath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o600); got != want {
+		t.Fatalf("file mode = %v, want %v", got, want)
 	}
 }
 
