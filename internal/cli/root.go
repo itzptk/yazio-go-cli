@@ -488,6 +488,9 @@ func (a *App) ensureToken(ctx context.Context) (yazio.Token, error) {
 	if err != nil {
 		return yazio.Token{}, err
 	}
+	if refreshed.RefreshToken == "" {
+		refreshed.RefreshToken = token.RefreshToken
+	}
 	a.cfg.Token = toConfigToken(refreshed)
 	if err := config.Save(a.cfgPath, a.cfg); err != nil {
 		return yazio.Token{}, err
