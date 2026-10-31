@@ -30,7 +30,7 @@ jobs:
   check_changes:
     name: Check for changes since last beta
     if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     outputs:
       has_changes: ${{ steps.check.outputs.has_changes }}
     steps:
@@ -67,7 +67,7 @@ jobs:
       !failure() && !cancelled() &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.channel != 'build-only') &&
       (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 30
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
@@ -145,7 +145,7 @@ jobs:
       !failure() && !cancelled() &&
       needs.preflight.result == 'success' &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.channel != 'build-only')
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -209,7 +209,7 @@ jobs:
   build_only:
     name: Build artifacts (no publish)
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.channel == 'build-only'
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -276,7 +276,7 @@ jobs:
       !failure() && !cancelled() &&
       needs.preflight.result == 'success' &&
       needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 10
     permissions:
       contents: write
@@ -373,7 +373,7 @@ jobs:
       needs.release.result == 'success' &&
       needs.preflight.outputs.release_channel == 'stable' &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.channel != 'build-only')
-    runs-on: ubuntu-latest
+    runs-on: instabox-medium
     timeout-minutes: 10
     permissions:
       contents: write
